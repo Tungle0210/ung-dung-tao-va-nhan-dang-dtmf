@@ -26,6 +26,8 @@ Object.entries(KEYPAD).forEach(([key, value]) => {
 
 const FS = 8000;
 const DURATION = 0.6;
+const TONE_DURATION = 0.35;
+const SILENCE_DURATION = 0.12;
 
 type DetectResult = {
   key: string;
@@ -33,6 +35,15 @@ type DetectResult = {
   highFreq: number;
   lowScore: number;
   highScore: number;
+};
+
+type SegmentResult = {
+  index: number;
+  key: string;
+  lowFreq: number;
+  highFreq: number;
+  startTime: number;
+  endTime: number;
 };
 
 function generateDTMF(key: string, fs = FS, duration = DURATION): Float32Array {
@@ -49,13 +60,40 @@ function generateDTMF(key: string, fs = FS, duration = DURATION): Float32Array {
   }
 
   const fadeLength = Math.floor(0.01 * fs);
-  for (let i = 0; i < fadeLength; i++) {
+  for (let i = 0; i < fadeLength && i < data.length; i++) {
     const gain = i / fadeLength;
     data[i] *= gain;
     data[data.length - 1 - i] *= gain;
   }
 
   return data;
+}
+
+function generatePhoneDTMF(
+  phone: string,
+  fs = FS,
+  toneDuration = TONE_DURATION,
+  silenceDuration = SILENCE_DURATION
+): Float32Array {
+  const clean = phone.replace(/[^0-9*#]/g, "");
+  const toneLen = Math.floor(fs * toneDuration);
+  const silenceLen = Math.floor(fs * silenceDuration);
+  const totalLen = clean.length * toneLen + Math.max(0, clean.length - 1) * silenceLen;
+
+  const output = new Float32Array(totalLen);
+  let offset = 0;
+
+  for (let i = 0; i < clean.length; i++) {
+    const tone = generateDTMF(clean[i], fs, toneDuration);
+    output.set(tone, offset);
+    offset += toneLen;
+
+    if (i !== clean.length - 1) {
+      offset += silenceLen;
+    }
+  }
+
+  return output;
 }
 
 function toneEnergy(data: Float32Array, fs: number, freq: number): number {
@@ -89,7 +127,7 @@ function detectDTMF(data: Float32Array, fs = FS): DetectResult {
   const high = highList.reduce((a, b) => (b.score > a.score ? b : a));
 
   const average =
-    cut.reduce((sum, value) => sum + Math.abs(value), 0) / cut.length;
+    cut.reduce((sum, value) => sum + Math.abs(value), 0) / Math.max(1, cut.length);
 
   let key = REVERSE_KEYPAD[`${low.freq}-${high.freq}`] || "Không rõ";
 
@@ -103,6 +141,100 @@ function detectDTMF(data: Float32Array, fs = FS): DetectResult {
     highFreq: high.freq,
     lowScore: low.score,
     highScore: high.score,
+  };
+}
+
+function detectDTMFSequence(data: Float32Array, fs = FS): {
+  sequence: string;
+  segments: SegmentResult[];
+} {
+  if (!data || data.length === 0) {
+    return { sequence: "", segments: [] };
+  }
+
+  const frameLen = Math.floor(0.02 * fs);
+  const hopLen = Math.floor(0.01 * fs);
+  const rmsList: number[] = [];
+
+  for (let start = 0; start + frameLen <= data.length; start += hopLen) {
+    let sum = 0;
+    for (let i = start; i < start + frameLen; i++) {
+      sum += data[i] * data[i];
+    }
+    rmsList.push(Math.sqrt(sum / frameLen));
+  }
+
+  const maxRms = Math.max(...rmsList, 0);
+  const threshold = Math.max(0.01, maxRms * 0.25);
+
+  const activeFrames = rmsList.map((rms) => rms > threshold);
+
+  const rawSegments: { start: number; end: number }[] = [];
+  let inSegment = false;
+  let segStartFrame = 0;
+
+  for (let i = 0; i < activeFrames.length; i++) {
+    if (activeFrames[i] && !inSegment) {
+      inSegment = true;
+      segStartFrame = i;
+    }
+
+    if ((!activeFrames[i] || i === activeFrames.length - 1) && inSegment) {
+      inSegment = false;
+      const segEndFrame = activeFrames[i] ? i : i - 1;
+
+      rawSegments.push({
+        start: segStartFrame * hopLen,
+        end: segEndFrame * hopLen + frameLen,
+      });
+    }
+  }
+
+  const mergedSegments: { start: number; end: number }[] = [];
+  const minGap = Math.floor(0.05 * fs);
+
+  for (const seg of rawSegments) {
+    if (mergedSegments.length === 0) {
+      mergedSegments.push(seg);
+      continue;
+    }
+
+    const last = mergedSegments[mergedSegments.length - 1];
+
+    if (seg.start - last.end < minGap) {
+      last.end = seg.end;
+    } else {
+      mergedSegments.push(seg);
+    }
+  }
+
+  const minToneLength = Math.floor(0.08 * fs);
+  const results: SegmentResult[] = [];
+
+  mergedSegments.forEach((seg, index) => {
+    const start = Math.max(0, seg.start - Math.floor(0.01 * fs));
+    const end = Math.min(data.length, seg.end + Math.floor(0.01 * fs));
+
+    if (end - start < minToneLength) return;
+
+    const piece = data.slice(start, end);
+    const detected = detectDTMF(piece, fs);
+
+    if (detected.key !== "Không nhận dạng" && detected.key !== "Không rõ") {
+      results.push({
+        index: results.length + 1,
+        key: detected.key,
+        lowFreq: detected.lowFreq,
+        highFreq: detected.highFreq,
+        startTime: start / fs,
+        endTime: end / fs,
+      });
+    }
+  });
+
+  return {
+    sequence: results.map((item) => item.key).join(""),
+    segments: results,
   };
 }
 
@@ -162,6 +294,8 @@ function Waveform({ data }: { data: Float32Array }) {
     const maxPoint = 700;
     let d = "";
 
+    if (!data || data.length === 0) return d;
+
     for (let i = 0; i < maxPoint; i++) {
       const index = Math.floor((i / maxPoint) * data.length);
       const x = (i / (maxPoint - 1)) * width;
@@ -219,13 +353,20 @@ function Spectrum({
 
 export default function App() {
   const [selectedKey, setSelectedKey] = useState("5");
+  const [phoneNumber, setPhoneNumber] = useState("0912345678");
+
   const [samples, setSamples] = useState<Float32Array>(() =>
     generateDTMF("5")
   );
+
   const [sourceName, setSourceName] = useState("Tín hiệu tạo từ phím 5");
+
   const [detected, setDetected] = useState<DetectResult>(() =>
     detectDTMF(generateDTMF("5"))
   );
+
+  const [detectedSequence, setDetectedSequence] = useState("");
+  const [segments, setSegments] = useState<SegmentResult[]>([]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -235,15 +376,52 @@ export default function App() {
     setSamples(data);
     setSourceName(`Tín hiệu tạo từ phím ${key}`);
     setDetected(detectDTMF(data));
+    setDetectedSequence(key);
+    setSegments([
+      {
+        index: 1,
+        key,
+        lowFreq: KEYPAD[key][0],
+        highFreq: KEYPAD[key][1],
+        startTime: 0,
+        endTime: DURATION,
+      },
+    ]);
+  }
+
+  function createPhoneSignal() {
+    const clean = phoneNumber.replace(/[^0-9*#]/g, "");
+
+    if (clean.length === 0) {
+      alert("Hãy nhập số điện thoại gồm các ký tự 0-9, * hoặc #.");
+      return;
+    }
+
+    const data = generatePhoneDTMF(clean);
+    const result = detectDTMFSequence(data);
+
+    setSamples(data);
+    setSourceName(`Tín hiệu DTMF của số: ${clean}`);
+    setDetectedSequence(result.sequence);
+    setSegments(result.segments);
+
+    if (result.segments.length > 0) {
+      const first = result.segments[0];
+      setDetected({
+        key: first.key,
+        lowFreq: first.lowFreq,
+        highFreq: first.highFreq,
+        lowScore: 0,
+        highScore: 0,
+      });
+    }
   }
 
   async function playSound() {
     const AudioContextClass =
       window.AudioContext || (window as any).webkitAudioContext;
 
-    const ctx =
-      audioContextRef.current || new AudioContextClass();
-
+    const ctx = audioContextRef.current || new AudioContextClass();
     audioContextRef.current = ctx;
 
     const buffer = ctx.createBuffer(1, samples.length, FS);
@@ -255,8 +433,37 @@ export default function App() {
     source.start();
   }
 
-  function recognize() {
-    setDetected(detectDTMF(samples));
+  function recognizeOneTone() {
+    const result = detectDTMF(samples);
+    setDetected(result);
+    setDetectedSequence(result.key);
+    setSegments([
+      {
+        index: 1,
+        key: result.key,
+        lowFreq: result.lowFreq,
+        highFreq: result.highFreq,
+        startTime: 0,
+        endTime: samples.length / FS,
+      },
+    ]);
+  }
+
+  function recognizePhoneNumber() {
+    const result = detectDTMFSequence(samples);
+    setDetectedSequence(result.sequence || "Không nhận dạng được");
+    setSegments(result.segments);
+
+    if (result.segments.length > 0) {
+      const first = result.segments[0];
+      setDetected({
+        key: first.key,
+        lowFreq: first.lowFreq,
+        highFreq: first.highFreq,
+        lowScore: 0,
+        highScore: 0,
+      });
+    }
   }
 
   async function openAudio(event: React.ChangeEvent<HTMLInputElement>) {
@@ -266,9 +473,7 @@ export default function App() {
     const AudioContextClass =
       window.AudioContext || (window as any).webkitAudioContext;
 
-    const ctx =
-      audioContextRef.current || new AudioContextClass();
-
+    const ctx = audioContextRef.current || new AudioContextClass();
     audioContextRef.current = ctx;
 
     const arrayBuffer = await file.arrayBuffer();
@@ -276,7 +481,7 @@ export default function App() {
 
     const channel = audioBuffer.getChannelData(0);
     const srcFs = audioBuffer.sampleRate;
-    const maxLen = Math.min(channel.length, Math.floor(srcFs * 0.8));
+    const maxLen = Math.min(channel.length, Math.floor(srcFs * 20));
     const raw = channel.slice(0, maxLen);
 
     let data: Float32Array;
@@ -293,9 +498,14 @@ export default function App() {
       }
     }
 
+    const sequenceResult = detectDTMFSequence(data);
+    const oneToneResult = detectDTMF(data);
+
     setSamples(data);
     setSourceName(`File âm thanh: ${file.name}`);
-    setDetected(detectDTMF(data));
+    setDetected(oneToneResult);
+    setDetectedSequence(sequenceResult.sequence || "Không nhận dạng được");
+    setSegments(sequenceResult.segments);
   }
 
   const keyRows = [
@@ -311,16 +521,18 @@ export default function App() {
         <div className="header">
           <div>
             <div className="badge">Đề tài 11 - DTMF</div>
-            <h1>Ứng dụng tạo và nhận dạng DTMF</h1>
+            <h1>Ứng dụng nhận dạng DTMF và số điện thoại</h1>
             <p>
-              Ứng dụng tạo âm phím điện thoại, phát âm thanh, vẽ dạng sóng,
-              phân tích phổ tần số và nhận dạng phím bằng xử lý tín hiệu số.
+              Ứng dụng tạo âm phím điện thoại, tạo âm cho cả số điện thoại,
+              mở file âm thanh, tách từng đoạn DTMF và nhận dạng lại chuỗi số.
             </p>
           </div>
 
           <div className="resultCard">
-            <div className="smallText">Kết quả nhận dạng</div>
-            <div className="bigResult">{detected.key}</div>
+            <div className="smallText">Chuỗi nhận dạng</div>
+            <div className="bigResult" style={{ fontSize: "34px", wordBreak: "break-all" }}>
+              {detectedSequence || detected.key}
+            </div>
             <div className="freqResult">
               {detected.lowFreq} Hz + {detected.highFreq} Hz
             </div>
@@ -329,6 +541,46 @@ export default function App() {
 
         <div className="grid">
           <div className="left">
+            <div className="card">
+              <h2>Tạo âm số điện thoại</h2>
+
+              <input
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                placeholder="Nhập số điện thoại, ví dụ 0912345678"
+                style={{
+                  width: "100%",
+                  padding: "14px",
+                  borderRadius: "14px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "18px",
+                  fontWeight: 700,
+                  marginBottom: "12px",
+                }}
+              />
+
+              <button className="mainButton" onClick={createPhoneSignal}>
+                Tạo âm cho số điện thoại
+              </button>
+
+              <button className="darkButton" onClick={recognizePhoneNumber}>
+                Nhận dạng số điện thoại
+              </button>
+
+              <button
+                className="grayButton"
+                onClick={() =>
+                  downloadWav(
+                    samples,
+                    FS,
+                    `dtmf_phone_${phoneNumber.replace(/[^0-9*#]/g, "") || "number"}.wav`
+                  )
+                }
+              >
+                Tải WAV số điện thoại
+              </button>
+            </div>
+
             <div className="card">
               <h2>Bàn phím DTMF</h2>
               <div className="keypad">
@@ -351,8 +603,8 @@ export default function App() {
                 Phát âm
               </button>
 
-              <button className="darkButton" onClick={recognize}>
-                Nhận dạng
+              <button className="darkButton" onClick={recognizeOneTone}>
+                Nhận dạng 1 phím
               </button>
 
               <label className="grayButton">
@@ -369,7 +621,7 @@ export default function App() {
                 className="grayButton"
                 onClick={() => downloadWav(samples, FS, `dtmf_${selectedKey}.wav`)}
               >
-                Tải file WAV
+                Tải WAV hiện tại
               </button>
             </div>
 
@@ -406,29 +658,51 @@ export default function App() {
             </div>
 
             <div className="card">
+              <h2>Kết quả tách và nhận dạng từng phím</h2>
+
+              {segments.length === 0 ? (
+                <p>Chưa có đoạn DTMF nào được nhận dạng.</p>
+              ) : (
+                <div className="table">
+                  {segments.map((item) => (
+                    <div className="tableRow" key={`${item.index}-${item.startTime}`}>
+                      <b>
+                        {item.index}. Phím {item.key}
+                      </b>
+                      <span>
+                        {item.lowFreq} Hz + {item.highFreq} Hz |{" "}
+                        {item.startTime.toFixed(2)}s - {item.endTime.toFixed(2)}s
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="card">
               <h2>Nguyên lý hoạt động</h2>
               <div className="theory">
                 <div>
-                  <h3>1. Tạo tín hiệu</h3>
+                  <h3>1. Tạo chuỗi DTMF</h3>
                   <p>
-                    Mỗi phím DTMF là tổng của hai sóng sin: một tần số thấp
-                    và một tần số cao.
+                    Mỗi chữ số được tạo bởi hai sóng sin. Các chữ số được nối
+                    với nhau bằng những khoảng im lặng ngắn.
                   </p>
                 </div>
 
                 <div>
-                  <h3>2. Phân tích phổ</h3>
+                  <h3>2. Tách đoạn âm</h3>
                   <p>
-                    Ứng dụng đo năng lượng tại 7 tần số chuẩn của DTMF:
-                    697, 770, 852, 941, 1209, 1336, 1477 Hz.
+                    Ứng dụng phân tích mức năng lượng để xác định đoạn nào là
+                    âm DTMF và đoạn nào là khoảng lặng.
                   </p>
                 </div>
 
                 <div>
-                  <h3>3. Nhận dạng</h3>
+                  <h3>3. Nhận dạng số</h3>
                   <p>
-                    Tần số thấp mạnh nhất và tần số cao mạnh nhất được ghép
-                    lại để suy ra phím đã bấm.
+                    Với từng đoạn âm, chương trình tìm cặp tần số mạnh nhất và
+                    tra bảng để suy ra phím, sau đó ghép thành số điện thoại.
                   </p>
                 </div>
               </div>
@@ -437,7 +711,7 @@ export default function App() {
         </div>
 
         <footer>
-          Đề tài: Xây dựng ứng dụng tạo và nhận dạng tín hiệu DTMF bằng xử lý tín hiệu số.
+          Đề tài: Ứng dụng tạo và nhận dạng tín hiệu DTMF, mở rộng nhận dạng chuỗi số điện thoại từ file âm thanh.
         </footer>
       </div>
     </div>
