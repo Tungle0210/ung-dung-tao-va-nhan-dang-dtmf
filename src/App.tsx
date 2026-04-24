@@ -420,17 +420,47 @@ export default function App() {
   async function playSound() {
     const AudioContextClass =
       window.AudioContext || (window as any).webkitAudioContext;
-
+  
     const ctx = audioContextRef.current || new AudioContextClass();
     audioContextRef.current = ctx;
-
-    const buffer = ctx.createBuffer(1, samples.length, FS);
-    buffer.copyToChannel(samples, 0);
-
+  
+    // Mở khóa âm thanh trên điện thoại
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+  
+    // Điện thoại thường chạy 44100 Hz hoặc 48000 Hz
+    const targetFs = ctx.sampleRate;
+  
+    // Resample từ FS = 8000 Hz sang sampleRate thật của điện thoại
+    const newLength = Math.floor((samples.length * targetFs) / FS);
+    const resampled = new Float32Array(newLength);
+  
+    for (let i = 0; i < newLength; i++) {
+      const oldIndex = i * FS / targetFs;
+      const index0 = Math.floor(oldIndex);
+      const index1 = Math.min(index0 + 1, samples.length - 1);
+      const frac = oldIndex - index0;
+  
+      const s0 = samples[index0] || 0;
+      const s1 = samples[index1] || 0;
+  
+      resampled[i] = s0 * (1 - frac) + s1 * frac;
+    }
+  
+    const buffer = ctx.createBuffer(1, resampled.length, targetFs);
+    buffer.copyToChannel(resampled, 0);
+  
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.start();
+  
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = 1.0;
+  
+    source.connect(gainNode);
+    gainNode.connect(ctx.destination);
+  
+    source.start(0);
   }
 
   function recognizeOneTone() {
