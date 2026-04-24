@@ -1,0 +1,313 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #e5e7eb;
+  color: #0f172a;
+}
+
+button,
+label {
+  font-family: inherit;
+}
+
+.page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #dbeafe, #f8fafc);
+  padding: 28px;
+}
+
+.container {
+  max-width: 1250px;
+  margin: 0 auto;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: 1fr 330px;
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 24px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 10px 16px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+h1 {
+  font-size: 44px;
+  line-height: 1.1;
+  margin: 0;
+  color: #0f172a;
+}
+
+p {
+  color: #475569;
+  line-height: 1.6;
+}
+
+.resultCard {
+  background: white;
+  border-radius: 24px;
+  padding: 22px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 15px 30px rgba(15, 23, 42, 0.08);
+}
+
+.smallText {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.bigResult {
+  font-size: 58px;
+  font-weight: 900;
+  color: #2563eb;
+  margin-top: 6px;
+}
+
+.freqResult {
+  color: #475569;
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 24px;
+}
+
+.left,
+.right {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.card {
+  background: white;
+  border-radius: 24px;
+  padding: 22px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 15px 30px rgba(15, 23, 42, 0.08);
+}
+
+.card h2 {
+  margin: 0 0 16px;
+  font-size: 22px;
+}
+
+.cardTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.cardTop h2 {
+  margin: 0;
+}
+
+.cardTop span {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.key {
+  height: 78px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  border-radius: 18px;
+  font-size: 34px;
+  font-weight: 900;
+  color: #0f172a;
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.key:hover {
+  transform: translateY(-2px);
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.activeKey {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+
+.mainButton,
+.darkButton,
+.grayButton {
+  width: 100%;
+  display: block;
+  text-align: center;
+  border: none;
+  border-radius: 16px;
+  padding: 14px 18px;
+  font-weight: 800;
+  font-size: 16px;
+  cursor: pointer;
+  margin-top: 12px;
+  transition: 0.15s;
+}
+
+.mainButton {
+  background: #2563eb;
+  color: white;
+}
+
+.mainButton:hover {
+  background: #1d4ed8;
+}
+
+.darkButton {
+  background: #0f172a;
+  color: white;
+}
+
+.darkButton:hover {
+  background: #1e293b;
+}
+
+.grayButton {
+  background: #f1f5f9;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+}
+
+.grayButton:hover {
+  background: #e2e8f0;
+}
+
+.table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tableRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.wavebox {
+  width: 100%;
+  height: 220px;
+  background: #f8fafc;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+}
+
+.spectrum {
+  height: 250px;
+  background: #f8fafc;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: end;
+  gap: 18px;
+  padding: 24px;
+}
+
+.barItem {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: end;
+  align-items: center;
+}
+
+.bar {
+  width: 100%;
+  max-width: 68px;
+  background: #cbd5e1;
+  border-radius: 12px 12px 0 0;
+}
+
+.bar.active {
+  background: #2563eb;
+}
+
+.freqText {
+  margin-top: 8px;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.hzText {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.theory {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.theory div {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.theory h3 {
+  margin: 0 0 8px;
+  color: #0f172a;
+}
+
+.theory p {
+  margin: 0;
+  font-size: 14px;
+}
+
+footer {
+  text-align: center;
+  color: #64748b;
+  padding: 30px 0 10px;
+  font-size: 14px;
+}
+
+@media (max-width: 950px) {
+  .header,
+  .grid,
+  .theory {
+    grid-template-columns: 1fr;
+  }
+
+  h1 {
+    font-size: 34px;
+  }
+
+  .page {
+    padding: 16px;
+  }
+}
